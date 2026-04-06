@@ -1,0 +1,37 @@
+name: PhotoManager
+options:
+  bundleIdPrefix: com.davidcsejtei
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGNING_ALLOWED: "NO"
+targets:
+  PhotoManager:
+    type: application
+    platform: macOS
+    sources:
+      - path: PhotoManager
+    info:
+      path: PhotoManager/Info.plist
+      properties:
+        CFBundleName: PhotoManager
+        CFBundleDisplayName: Photo Manager
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "14.0"
+        NSHighResolutionCapable: true
+        NSHumanReadableCopyright: ""
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.davidcsejtei.photomanager
+        GENERATE_INFOPLIST_FILE: "NO"
+        ENABLE_HARDENED_RUNTIME: "YES"
+        COMBINE_HIDPI_IMAGES: "YES"
+    dependencies:
+      - sdk: ImageCaptureCore.framework
