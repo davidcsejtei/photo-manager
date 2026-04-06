@@ -114,7 +114,21 @@ struct ContentView: View {
 
     private var firstSelectedPhoto: Photo? {
         guard let id = cameraVM.selectedPhotoIDs.first else { return nil }
-        return cameraVM.photos.first { $0.id == id }
+
+        // Eloszor a kamera fotokban keresunk
+        if let photo = cameraVM.photos.first(where: { $0.id == id }) {
+            return photo
+        }
+
+        // Ha album van kivalasztva es syncable, a lokal mappaban keresunk
+        if case .album(let albumID) = selection,
+           let album = albumVM.albums.first(where: { $0.id == albumID }),
+           album.isSyncable {
+            let photos = albumVM.loadLocalPhotos(for: album)
+            return photos.first(where: { $0.id == id })
+        }
+
+        return nil
     }
 
     private var connectionTitle: String {
