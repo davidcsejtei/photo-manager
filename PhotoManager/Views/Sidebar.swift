@@ -5,6 +5,7 @@ struct Sidebar: View {
     @Binding var selection: ContentView.Section?
     @EnvironmentObject var albumVM: AlbumViewModel
     @EnvironmentObject var uploadVM: UploadBatchViewModel
+    @EnvironmentObject var cameraVM: CameraViewModel
 
     var body: some View {
         List(selection: $selection) {
@@ -15,13 +16,38 @@ struct Sidebar: View {
 
             Section {
                 ForEach(albumVM.albums) { album in
-                    Label(album.name, systemImage: "rectangle.stack")
-                        .tag(ContentView.Section.album(album.id))
-                        .contextMenu {
-                            Button("Törlés", role: .destructive) {
-                                albumVM.deleteAlbum(album.id)
+                    HStack {
+                        Label(album.name, systemImage: "rectangle.stack")
+                        Spacer()
+                        // Feltöltés ikon — ha már fent van, zöld pipa; ha épp tölt, spinner.
+                        if albumVM.uploadingAlbumID == album.id {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Button {
+                                Task {
+                                    await albumVM.uploadAlbumToDrive(
+                                        albumID: album.id,
+                                        allPhotos: cameraVM.photos
+                                    )
+                                }
+                            } label: {
+                                Image(systemName: album.isOnDrive
+                                      ? "checkmark.icloud.fill"
+                                      : "icloud.and.arrow.up")
+                                    .foregroundStyle(album.isOnDrive ? .green : .accentColor)
+                                    .font(.caption)
                             }
+                            .buttonStyle(.borderless)
+                            .help(album.isOnDrive ? "Szinkronizálás a Drive-ra" : "Feltöltés a Drive-ra")
                         }
+                    }
+                    .tag(ContentView.Section.album(album.id))
+                    .contextMenu {
+                        Button("Törlés", role: .destructive) {
+                            albumVM.deleteAlbum(album.id)
+                        }
+                    }
                 }
             } header: {
                 HStack {
@@ -61,17 +87,55 @@ struct Sidebar: View {
         .sheet(isPresented: $uploadVM.isCreating) {
             newBatchSheet
         }
+        // Drive upload státusz / hiba üzenetek
+        .alert("Feltöltés hiba", isPresented: .constant(albumVM.uploadError != nil), actions: {
+            Button("OK") { albumVM.uploadError = nil }
+        }, message: {
+            Text(albumVM.uploadError ?? "")
+        })
+        .onChange(of: albumVM.uploadStatus) { _, status in
+            // Státusz üzenet 3 mp-ig látható, majd eltűnik.
+            if status != nil {
+                Task {
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    if albumVM.uploadingAlbumID == nil {
+                        albumVM.uploadStatus = nil
+                    }
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let status = albumVM.uploadStatus {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.thinMaterial)
+            }
+        }
     }
+
+    // MARK: - Sheets
 
     private var newAlbumSheet: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Új album").font(.headline)
             TextField("Album neve", text: $albumVM.newAlbumName)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 260)
+                .frame(width: 280)
+            if let error = albumVM.createError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
             HStack {
                 Spacer()
-                Button("Mégse") { albumVM.isCreatingAlbum = false }
+                Button("Mégse") {
+                    albumVM.isCreatingAlbum = false
+                    albumVM.createError = nil
+                }
                 Button("Létrehoz") { albumVM.confirmCreateAlbum() }
                     .keyboardShortcut(.defaultAction)
             }

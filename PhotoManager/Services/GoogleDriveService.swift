@@ -227,6 +227,39 @@ final class GoogleDriveService: ObservableObject {
         return result
     }
 
+    /// Keres egy mappát név + szülő alapján. Ha nincs, létrehozza.
+    /// A `parentID == nil` esetben a Drive gyökerében keres.
+    func findOrCreateFolder(named name: String, parentID: String?) async throws -> String {
+        if let existing = try await findFolder(named: name, parentID: parentID) {
+            return existing
+        }
+        return try await createFolder(named: name, parentID: parentID)
+    }
+
+    /// Keres egy létező mappát név + szülő alapján. `nil`-t ad ha nincs.
+    func findFolder(named name: String, parentID: String?) async throws -> String? {
+        let token = try await ensureValidToken()
+        let parent = parentID ?? "root"
+        let q = "name='\(name)' and '\(parent)' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        var comps = URLComponents(string: "https://www.googleapis.com/drive/v3/files")!
+        comps.queryItems = [
+            .init(name: "q", value: q),
+            .init(name: "fields", value: "files(id,name)"),
+            .init(name: "pageSize", value: "1")
+        ]
+        var req = URLRequest(url: comps.url!)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else {
+            throw DriveError.http("findFolder", status, String(data: data, encoding: .utf8) ?? "")
+        }
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let files = json?["files"] as? [[String: Any]] ?? []
+        return files.first?["id"] as? String
+    }
+
     // MARK: - Helpers
 
     private func mimeType(for ext: String) -> String {
