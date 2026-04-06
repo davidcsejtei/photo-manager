@@ -52,14 +52,20 @@ struct PhotoDetailView: View {
                 Text("Még nincs album.").font(.caption).foregroundStyle(.secondary)
             } else {
                 ForEach(albumVM.albums) { album in
+                    let isAdded = album.isSyncable
+                        ? album.photoIDs.contains(photo.localURL?.lastPathComponent ?? "")
+                        : album.photoIDs.contains(photo.id)
                     Button {
-                        albumVM.addPhotos([photo.id], to: album.id)
+                        albumVM.addCameraPhoto(photo, to: album.id)
                     } label: {
                         HStack {
                             Image(systemName: "rectangle.stack")
                             Text(album.name)
+                            if album.isSyncable {
+                                Image(systemName: "icloud").font(.caption2).foregroundStyle(.secondary)
+                            }
                             Spacer()
-                            if album.photoIDs.contains(photo.id) {
+                            if isAdded {
                                 Image(systemName: "checkmark").foregroundStyle(.green)
                             }
                         }
@@ -143,35 +149,25 @@ private struct LargePreview: View {
 
     @MainActor
     private func load() async {
-        #if canImport(AppKit) && canImport(QuickLookThumbnailing)
+        #if canImport(AppKit)
         guard let url = photo.localURL else { return }
 
-        // 1) Cache hit → azonnali rajzolás.
+        // 1) Cache hit a gyors megjelenítéshez.
         if let cached = ThumbnailCache.shared.image(for: url) {
             self.image = cached
         } else {
             self.image = nil
         }
 
-        // 2) Nagy verzió generálása háttérben.
-        let scale = NSScreen.main?.backingScaleFactor ?? 2
-        let target = CGSize(width: 2000, height: 1500)
-        let request = QLThumbnailGenerator.Request(
-            fileAt: url,
-            size: target,
-            scale: scale,
-            representationTypes: .thumbnail
-        )
-        do {
-            let rep = try await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)
-            let img = rep.nsImage
+        // 2) Teljes képet közvetlenül NSImage-ből töltjük be — éles, natív felbontás.
+        //    Háttérszálon olvassuk, hogy ne blokkolja a UI-t nagy fájloknál.
+        let loadedImage: NSImage? = await Task.detached {
+            NSImage(contentsOf: url)
+        }.value
+
+        if let img = loadedImage, photo.localURL == url {
             ThumbnailCache.shared.set(img, for: url)
-            // Csak akkor írjuk át, ha közben nem váltott más képre a user.
-            if photo.localURL == url {
-                self.image = img
-            }
-        } catch {
-            // placeholder marad
+            self.image = img
         }
         #endif
     }

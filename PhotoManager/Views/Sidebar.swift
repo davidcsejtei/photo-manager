@@ -21,9 +21,12 @@ struct Sidebar: View {
                         Spacer()
                         Button {
                             Task {
+                                let photos: [Photo] = album.isSyncable
+                                    ? albumVM.loadLocalPhotos(for: album)
+                                    : cameraVM.photos
                                 await albumVM.uploadAlbumToDrive(
                                     albumID: album.id,
-                                    allPhotos: cameraVM.photos
+                                    allPhotos: photos
                                 )
                             }
                         } label: {

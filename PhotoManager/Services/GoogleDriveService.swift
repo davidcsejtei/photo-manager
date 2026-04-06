@@ -185,6 +185,21 @@ final class GoogleDriveService: ObservableObject {
         return (json?["id"] as? String) ?? ""
     }
 
+    /// Drive fajl/mappa atnevezese (PATCH files.update).
+    func renameFile(driveFileID: String, newName: String) async throws {
+        let token = try await ensureValidToken()
+        var req = URLRequest(url: URL(string: "https://www.googleapis.com/drive/v3/files/\(driveFileID)")!)
+        req.httpMethod = "PATCH"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["name": newName])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else {
+            throw DriveError.http("renameFile", status, String(data: data, encoding: .utf8) ?? "")
+        }
+    }
+
     func deleteFile(driveFileID: String) async throws {
         let token = try await ensureValidToken()
         var req = URLRequest(url: URL(string: "https://www.googleapis.com/drive/v3/files/\(driveFileID)")!)

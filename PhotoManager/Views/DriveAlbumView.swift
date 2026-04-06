@@ -1,8 +1,10 @@
 import SwiftUI
+#if canImport(AppKit)
+import AppKit
+#endif
 
 /// Drive-on letezo album tartalmat mutatja — ugyanolyan grid + preview
-/// layouttal, mint a lokal albumok. A thumbnaileket es a nagy kepeket
-/// a Google Drive API-rol tolti le es lokalisan cache-eli.
+/// layouttal, mint a lokal albumok.
 struct DriveAlbumView: View {
     let folderID: String
     @EnvironmentObject var albumVM: AlbumViewModel
@@ -11,7 +13,6 @@ struct DriveAlbumView: View {
     @State private var selection: Set<String> = []
     @State private var isLoading = true
     @State private var errorMessage: String?
-    /// Drive file ID -> drive file, a teljes kep letolteshez.
     @State private var driveFileMap: [String: GoogleDriveService.DriveFile] = [:]
 
     private let drive = GoogleDriveService.shared
@@ -19,16 +20,46 @@ struct DriveAlbumView: View {
     var body: some View {
         HSplitView {
             gridPane
-                .frame(minWidth: 400)
+                .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
             detailPane
-                .frame(minWidth: 300, idealWidth: 500)
+                .frame(minWidth: 300, idealWidth: 500, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(albumName)
         .task(id: folderID) { await loadAlbum() }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    guard let da = currentDriveAlbum else { return }
+                    Task { await albumVM.downloadDriveAlbumToLocal(driveAlbum: da) }
+                } label: {
+                    Label("Letoltes helyire", systemImage: "arrow.down.to.line")
+                }
+                .disabled(albumVM.downloadingDriveAlbumID != nil)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if albumVM.downloadingDriveAlbumID == folderID {
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgressView(value: albumVM.downloadProgress)
+                        .progressViewStyle(.linear)
+                    if let status = albumVM.downloadStatus {
+                        Text(status).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.thinMaterial)
+            }
+        }
+    }
+
+    private var currentDriveAlbum: DriveAlbum? {
+        albumVM.driveAlbums.first(where: { $0.id == folderID })
     }
 
     private var albumName: String {
-        albumVM.driveAlbums.first(where: { $0.id == folderID })?.name ?? "Drive album"
+        currentDriveAlbum?.name ?? "Drive album"
     }
 
     // MARK: - Grid
@@ -90,7 +121,6 @@ struct DriveAlbumView: View {
             let files = try await drive.listFolderDetailed(folderID)
             let cacheDir = GoogleDriveService.cacheDir
 
-            // Photo objektumok letrehozasa — meg thumbnail nelkul
             var newPhotos: [Photo] = []
             for f in files {
                 driveFileMap[f.id] = f
@@ -116,12 +146,10 @@ struct DriveAlbumView: View {
                 if FileManager.default.fileExists(atPath: thumbPath.path) { continue }
                 guard let link = file.thumbnailLink else { continue }
 
-                // A Google thumbnailLink-ben levo s220 meretet nagyobbra csereljuk
                 let biggerLink = link.replacingOccurrences(of: "=s220", with: "=s400")
 
                 do {
                     try await drive.downloadThumbnail(link: biggerLink, to: thumbPath)
-                    // Frissitjuk a Photo objektumot a letoltott thumbnail-lel
                     if i < photos.count, photos[i].id == file.id {
                         photos[i] = Photo(
                             id: file.id,
@@ -135,7 +163,7 @@ struct DriveAlbumView: View {
                         )
                     }
                 } catch {
-                    // Csendben — placeholder marad
+                    // placeholder marad
                 }
             }
         } catch {
@@ -148,57 +176,27 @@ struct DriveAlbumView: View {
 // MARK: - Drive photo detail
 
 /// A Drive-rol szarmazo kep reszletei + nagy elonezet.
-/// A nagy kepet on-demand tolti le a Drive API-rol.
+/// NSImage-bol kozvetlenul tolt be (nem QLThumbnailGenerator-bol),
+/// mert a Drive-rol letoltott fajlok nem feltetlen rendelkeznek QL thumbnaillel.
 private struct DrivePhotoDetail: View {
     let photo: Photo
     let driveFile: GoogleDriveService.DriveFile?
 
-    @State private var fullImageURL: URL?
+    #if canImport(AppKit)
+    @State private var previewImage: NSImage?
+    #endif
     @State private var isDownloading = false
+    @State private var fullImageCached = false
 
     var body: some View {
         GeometryReader { geo in
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     // Nagy kep
-                    Group {
-                        if let url = fullImageURL {
-                            ThumbnailView(
-                                url: url,
-                                targetSize: CGSize(width: 2000, height: 1500),
-                                contentMode: .fit
-                            )
-                        } else if let url = photo.localURL {
-                            // Thumbnail mint placeholder
-                            ThumbnailView(
-                                url: url,
-                                targetSize: CGSize(width: 600, height: 400),
-                                contentMode: .fit
-                            )
-                            .overlay {
-                                if isDownloading {
-                                    ProgressView()
-                                        .controlSize(.regular)
-                                        .padding(8)
-                                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                                }
-                            }
-                        } else {
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.15))
-                                .overlay {
-                                    if isDownloading {
-                                        ProgressView("Kep letoltese...")
-                                    } else {
-                                        Image(systemName: "photo")
-                                            .font(.system(size: 48))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: geo.size.height * 0.8)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    imagePreview
+                        .frame(maxWidth: .infinity, maxHeight: geo.size.height * 0.8)
+                        .background(Color.black.opacity(0.04))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
 
                     // Metaadatok
                     VStack(alignment: .leading, spacing: 6) {
@@ -216,7 +214,43 @@ private struct DrivePhotoDetail: View {
                 .padding()
             }
         }
-        .task(id: photo.id) { await downloadFullImage() }
+        .task(id: photo.id) { await loadPreview() }
+    }
+
+    @ViewBuilder
+    private var imagePreview: some View {
+        #if canImport(AppKit)
+        if let image = previewImage {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .overlay(alignment: .bottomTrailing) {
+                    if isDownloading {
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(8)
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                            .padding(8)
+                    }
+                }
+        } else {
+            ZStack {
+                Color.gray.opacity(0.15)
+                if isDownloading {
+                    VStack(spacing: 8) {
+                        ProgressView()
+                        Text("Kep letoltese...").font(.caption).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Image(systemName: "photo")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        #else
+        Color.gray.opacity(0.15)
+        #endif
     }
 
     private func labeledRow(_ label: String, value: String) -> some View {
@@ -228,25 +262,43 @@ private struct DrivePhotoDetail: View {
         .font(.callout)
     }
 
-    private func downloadFullImage() async {
+    @MainActor
+    private func loadPreview() async {
+        #if canImport(AppKit)
+        previewImage = nil
+        isDownloading = false
+        fullImageCached = false
+
+        // 1) Thumbnail — azonnali megjelenites, ha van cache-elt
+        if let thumbURL = photo.localURL {
+            previewImage = NSImage(contentsOf: thumbURL)
+        }
+
+        // 2) Teljes kep letoltese Drive-rol
         guard let driveFile else { return }
         let cacheDir = GoogleDriveService.cacheDir
         let ext = (driveFile.name as NSString).pathExtension
         let fullPath = cacheDir.appendingPathComponent("full_\(driveFile.id).\(ext)")
 
-        // Mar letezik a cache-ben?
         if FileManager.default.fileExists(atPath: fullPath.path) {
-            fullImageURL = fullPath
+            if let img = NSImage(contentsOf: fullPath) {
+                previewImage = img
+                fullImageCached = true
+            }
             return
         }
 
         isDownloading = true
         do {
             try await GoogleDriveService.shared.downloadFileContent(fileID: driveFile.id, to: fullPath)
-            fullImageURL = fullPath
+            if let img = NSImage(contentsOf: fullPath) {
+                previewImage = img
+                fullImageCached = true
+            }
         } catch {
             // Marad a thumbnail
         }
         isDownloading = false
+        #endif
     }
 }

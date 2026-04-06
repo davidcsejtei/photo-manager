@@ -7,6 +7,8 @@ struct PhotoGridView: View {
 
     let photos: [Photo]
     @Binding var selection: Set<String>
+    /// Photo ID-k amik meg nincsenek szinkronizalva a Drive-ra.
+    var unsyncedIDs: Set<String> = []
 
     @FocusState private var gridFocused: Bool
     @State private var columnCount: Int = 1
@@ -24,7 +26,7 @@ struct PhotoGridView: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: itemSpacing) {
                     ForEach(photos) { photo in
-                        PhotoCell(photo: photo, isSelected: selection.contains(photo.id))
+                        PhotoCell(photo: photo, isSelected: selection.contains(photo.id), isUnsynced: unsyncedIDs.contains(photo.id))
                             .id(photo.id)
                             .onTapGesture {
                                 handleTap(on: photo)
@@ -142,12 +144,11 @@ struct PhotoGridView: View {
 private struct PhotoCell: View {
     let photo: Photo
     let isSelected: Bool
+    var isUnsynced: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             ZStack(alignment: .topTrailing) {
-                // Rectangle adja a stabil 3:2 méretet minden cellának,
-                // függetlenül attól, hogy a kép landscape vagy portrait.
                 Rectangle()
                     .fill(Color.gray.opacity(0.2))
                     .aspectRatio(3/2, contentMode: .fit)
@@ -161,21 +162,33 @@ private struct PhotoCell: View {
                         }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 8))
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.white, .blue)
-                        .padding(6)
+                // Jobb felso sarok badge-ek
+                VStack(spacing: 4) {
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.white, .blue)
+                    }
+                    if isUnsynced {
+                        Image(systemName: "icloud.slash")
+                            .font(.caption)
+                            .foregroundStyle(.white)
+                            .padding(3)
+                            .background(.orange, in: Circle())
+                    }
                 }
+                .padding(6)
             }
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 3)
+                    .strokeBorder(isSelected ? Color.accentColor : isUnsynced ? Color.orange.opacity(0.6) : .clear, lineWidth: isSelected ? 3 : isUnsynced ? 2 : 0)
             )
-            Text(photo.fileName)
-                .font(.caption)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            HStack(spacing: 4) {
+                Text(photo.fileName)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
         }
         .contentShape(Rectangle())
     }

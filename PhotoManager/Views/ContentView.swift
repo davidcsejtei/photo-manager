@@ -80,11 +80,17 @@ struct ContentView: View {
             .navigationTitle(connectionTitle)
         case .album(let id):
             if let album = albumVM.albums.first(where: { $0.id == id }) {
-                let photos = cameraVM.photos.filter { album.photoIDs.contains($0.id) }
-                PhotoGridView(photos: photos, selection: $cameraVM.selectedPhotoIDs)
-                    .navigationTitle("Album — \(album.name)")
+                let photos: [Photo] = album.isSyncable
+                    ? albumVM.loadLocalPhotos(for: album)
+                    : cameraVM.photos.filter { album.photoIDs.contains($0.id) }
+                let unsynced: Set<String> = {
+                    guard let idx = album.driveFileIndex else { return [] }
+                    return Set(album.photoIDs.filter { idx[$0] == nil })
+                }()
+                PhotoGridView(photos: photos, selection: $cameraVM.selectedPhotoIDs, unsyncedIDs: unsynced)
+                    .navigationTitle("Album -- \(album.name)")
             } else {
-                Text("Album nem található")
+                Text("Album nem talalhato")
             }
         case .uploadBatch(let id):
             UploadBatchView(batchID: id)
