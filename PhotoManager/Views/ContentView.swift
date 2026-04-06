@@ -10,6 +10,7 @@ struct ContentView: View {
         case camera
         case album(UUID)
         case uploadBatch(UUID)
+        case driveAlbum(String)   // Drive folder ID — csak tavoli album
     }
 
     @EnvironmentObject var cameraVM: CameraViewModel
@@ -29,7 +30,10 @@ struct ContentView: View {
             detailPane
                 .frame(minWidth: 560, idealWidth: 720)
         }
-        .task { cameraVM.start() }
+        .task {
+            cameraVM.start()
+            await albumVM.fetchDriveAlbums()
+        }
         .toolbar { toolbarContent }
         .alert("Hiba", isPresented: .constant(cameraVM.errorMessage != nil), actions: {
             Button("OK") { cameraVM.errorMessage = nil }
@@ -73,6 +77,8 @@ struct ContentView: View {
             }
         case .uploadBatch(let id):
             UploadBatchView(batchID: id)
+        case .driveAlbum(let folderID):
+            DriveAlbumView(folderID: folderID)
         }
     }
 
@@ -119,6 +125,8 @@ struct ContentView: View {
             cameraVM.clearSelection()
         case .camera, .none:
             Task { await cameraVM.deleteSelected() }
+        case .driveAlbum:
+            break
         }
     }
 
@@ -126,6 +134,7 @@ struct ContentView: View {
         switch selection {
         case .album: return ("Eltávolítás az albumból", "minus.circle")
         case .uploadBatch: return ("Eltávolítás a mappából", "minus.circle")
+        case .driveAlbum: return ("", "trash")
         case .camera, .none: return ("Törlés a kameráról", "trash")
         }
     }

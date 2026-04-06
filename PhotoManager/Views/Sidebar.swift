@@ -19,28 +19,29 @@ struct Sidebar: View {
                     HStack {
                         Label(album.name, systemImage: "rectangle.stack")
                         Spacer()
-                        // Feltöltés ikon — ha már fent van, zöld pipa; ha épp tölt, spinner.
-                        if albumVM.uploadingAlbumID == album.id {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Button {
-                                Task {
-                                    await albumVM.uploadAlbumToDrive(
-                                        albumID: album.id,
-                                        allPhotos: cameraVM.photos
-                                    )
-                                }
-                            } label: {
-                                Image(systemName: album.isOnDrive
+                        Button {
+                            Task {
+                                await albumVM.uploadAlbumToDrive(
+                                    albumID: album.id,
+                                    allPhotos: cameraVM.photos
+                                )
+                            }
+                        } label: {
+                            Image(systemName: albumVM.uploadingAlbumID == album.id
+                                  ? "arrow.trianglehead.2.clockwise.rotate.90"
+                                  : album.isOnDrive
                                       ? "checkmark.icloud.fill"
                                       : "icloud.and.arrow.up")
-                                    .foregroundStyle(album.isOnDrive ? .green : .accentColor)
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.borderless)
-                            .help(album.isOnDrive ? "Szinkronizálás a Drive-ra" : "Feltöltés a Drive-ra")
+                                .foregroundStyle(
+                                    albumVM.uploadingAlbumID == album.id ? .orange
+                                    : album.isOnDrive ? .green
+                                    : .accentColor
+                                )
+                                .font(.caption)
                         }
+                        .buttonStyle(.borderless)
+                        .disabled(albumVM.uploadingAlbumID != nil)
+                        .help(album.isOnDrive ? "Szinkronizalas a Drive-ra" : "Feltoltes a Drive-ra")
                     }
                     .tag(ContentView.Section.album(album.id))
                     .contextMenu {
@@ -63,14 +64,50 @@ struct Sidebar: View {
             }
 
             Section {
+                // Helyi albumok amik mar fent vannak a Drive-on
+                ForEach(albumVM.albums.filter { $0.isOnDrive }) { album in
+                    Label(album.name, systemImage: "checkmark.icloud.fill")
+                        .foregroundStyle(.green)
+                        .tag(ContentView.Section.album(album.id))
+                }
+                // Csak Drive-on letezo albumok (nincs helyi par)
+                ForEach(albumVM.remoteOnlyDriveAlbums) { da in
+                    Label {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(da.name)
+                            Text(da.year)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "icloud")
+                            .foregroundStyle(.secondary)
+                    }
+                    .tag(ContentView.Section.driveAlbum(da.id))
+                }
+                // Upload batch-ek
                 ForEach(uploadVM.batches) { batch in
                     Label(batch.name, systemImage: batch.isUploaded ? "icloud.fill" : "tray.and.arrow.up")
                         .tag(ContentView.Section.uploadBatch(batch.id))
                 }
+                // Betoltes jelzo
+                if albumVM.isFetchingDriveAlbums {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Drive albumok betoltese...").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             } header: {
                 HStack {
-                    Text("Drive feltöltések")
+                    Text("Drive")
                     Spacer()
+                    Button {
+                        Task { await albumVM.fetchDriveAlbums() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Drive albumok frissitese")
                     Button {
                         uploadVM.startCreating()
                     } label: {
@@ -105,14 +142,23 @@ struct Sidebar: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if let status = albumVM.uploadStatus {
-                Text(status)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(.thinMaterial)
+            if albumVM.uploadingAlbumID != nil || albumVM.uploadStatus != nil {
+                VStack(alignment: .leading, spacing: 4) {
+                    if albumVM.uploadingAlbumID != nil {
+                        ProgressView(value: albumVM.uploadProgress)
+                            .progressViewStyle(.linear)
+                    }
+                    if let status = albumVM.uploadStatus {
+                        Text(status)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.thinMaterial)
             }
         }
     }
