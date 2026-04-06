@@ -24,11 +24,22 @@ struct ContentView: View {
             Sidebar(selection: $selection)
                 .frame(minWidth: 220)
         } content: {
-            centerPane
-                .frame(minWidth: 420)
+            if case .driveAlbum(let id) = selection {
+                // Drive album sajat grid + detail layouttal
+                DriveAlbumView(folderID: id)
+                    .frame(minWidth: 900)
+            } else {
+                centerPane
+                    .frame(minWidth: 420)
+            }
         } detail: {
-            detailPane
-                .frame(minWidth: 560, idealWidth: 720)
+            if case .driveAlbum = selection {
+                // DriveAlbumView sajat detail-t kezel, itt ures
+                EmptyView()
+            } else {
+                detailPane
+                    .frame(minWidth: 560, idealWidth: 720)
+            }
         }
         .task {
             cameraVM.start()

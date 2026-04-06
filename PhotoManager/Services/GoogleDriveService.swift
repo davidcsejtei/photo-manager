@@ -260,6 +260,88 @@ final class GoogleDriveService: ObservableObject {
         return files.first?["id"] as? String
     }
 
+    // MARK: - Detailed listing + download
+
+    struct DriveFile {
+        let id: String
+        let name: String
+        let size: Int64
+        let mimeType: String
+        let createdTime: Date?
+        let thumbnailLink: String?
+    }
+
+    /// Reszletes fajllista — id, nev, meret, mimeType, letrehozasi ido, thumbnailLink.
+    func listFolderDetailed(_ folderID: String) async throws -> [DriveFile] {
+        let token = try await ensureValidToken()
+        var comps = URLComponents(string: "https://www.googleapis.com/drive/v3/files")!
+        comps.queryItems = [
+            .init(name: "q", value: "'\(folderID)' in parents and trashed=false"),
+            .init(name: "fields", value: "files(id,name,size,mimeType,createdTime,thumbnailLink)"),
+            .init(name: "pageSize", value: "1000")
+        ]
+        var req = URLRequest(url: comps.url!)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else {
+            throw DriveError.http("listFolderDetailed", status, String(data: data, encoding: .utf8) ?? "")
+        }
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let files = json?["files"] as? [[String: Any]] ?? []
+
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        return files.compactMap { f -> DriveFile? in
+            guard let id = f["id"] as? String, let name = f["name"] as? String else { return nil }
+            let size = Int64((f["size"] as? String).flatMap { Int64($0) } ?? 0)
+            let mime = f["mimeType"] as? String ?? ""
+            // Mappakat kiszurjuk
+            if mime == "application/vnd.google-apps.folder" { return nil }
+            let created = (f["createdTime"] as? String).flatMap { dateFormatter.date(from: $0) }
+            let thumb = f["thumbnailLink"] as? String
+            return DriveFile(id: id, name: name, size: size, mimeType: mime, createdTime: created, thumbnailLink: thumb)
+        }
+    }
+
+    /// Egy Drive fajl thumbnailjet tolti le (a thumbnailLink-rol, auth-tal).
+    func downloadThumbnail(link: String, to destination: URL) async throws {
+        let token = try await ensureValidToken()
+        guard let url = URL(string: link) else { return }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else { return }
+        try data.write(to: destination, options: .atomic)
+    }
+
+    /// Egy Drive fajl teljes tartalmat tolti le (eredeti kepfajl).
+    func downloadFileContent(fileID: String, to destination: URL) async throws {
+        let token = try await ensureValidToken()
+        let url = URL(string: "https://www.googleapis.com/drive/v3/files/\(fileID)?alt=media")!
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else {
+            throw DriveError.http("downloadFile", status, String(data: data, encoding: .utf8) ?? "")
+        }
+        try data.write(to: destination, options: .atomic)
+    }
+
+    /// Drive cache konyvtar — thumbnailek es teljes fajlok ideiglenesen ide kerulnek.
+    static let cacheDir: URL = {
+        let fm = FileManager.default
+        let base = (try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
+            ?? fm.temporaryDirectory
+        let dir = base.appendingPathComponent("PhotoManager/drive-cache", isDirectory: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
     // MARK: - Helpers
 
     private func mimeType(for ext: String) -> String {
